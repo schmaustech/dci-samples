@@ -1,0 +1,170 @@
+---
+
+    - name: Setup Networking for Ansibler and DNS
+      shell: |
+        source /home/stack/my_vars
+        source /home/stack/overcloudrc
+        openstack router create ${ROUTER_ANSIBLER}
+        openstack network create ${ANSIBLER_NETWORK}
+        openstack subnet create --network ${ANSIBLER_NETWORK} --subnet-range ${ANSIBLER_NET_CIDR} --dns-nameserver ${DNSFORWARDER1} --dns-nameserver ${DNSFORWARDER2} ${ANSIBLER_SUBNET}
+        export PUBLIC_NETWORK_ID=$(openstack network show ${PUBLIC_NETWORK} -f value -c id)
+        export ANSIBLER_NETWORK_ID=$(openstack network show ${ANSIBLER_NETWORK} -f value -c id)
+        export ANSIBLER_SUBNET_ID=$(openstack subnet show ${ANSIBLER_SUBNET} -f value -c id)
+        openstack router add subnet ${ROUTER_ANSIBLER} ${ANSIBLER_SUBNET_ID}
+        openstack router set --external-gateway ${PUBLIC_NETWORK_ID} ${ROUTER_ANSIBLER}
+
+    - name: Setup DNS Host and SG
+      shell: |
+        source /home/stack/my_vars
+        source /home/stack/overcloudrc
+        export PUBLIC_NETWORK_ID=$(openstack network show ${PUBLIC_NETWORK} -f value -c id)
+        export ANSIBLER_NETWORK_ID=$(openstack network show ${ANSIBLER_NETWORK} -f value -c id)
+        export ANSIBLER_SUBNET_ID=$(openstack subnet show ${ANSIBLER_SUBNET} -f value -c id)
+        openstack security group create ${DNS_SG_NAME}
+        openstack security group rule create --ingress --protocol icmp ${DNS_SG_NAME}
+        openstack security group rule create --ingress --protocol tcp --dst-port 22 ${DNS_SG_NAME}
+        openstack security group rule create --ingress --protocol udp --dst-port 53 ${DNS_SG_NAME}
+        openstack security group rule create --ingress --protocol tcp --dst-port 53 ${DNS_SG_NAME}
+        openstack server create --nic net-id=${ANSIBLER_NETWORK_ID},v4-fixed-ip=${ANSIBLER_DOTS}.51 --flavor ${ANSIBLERSIZE} --image ${RHELIMAGE} --key-name ${KEYPAIR} --security-group ${DNS_SG_NAME} ${CLUSTERID
+}-dns.${MYDOMAIN} 
+        openstack server add floating ip ${CLUSTERID}-dns.${MYDOMAIN} $(openstack floating ip create ${PUBLIC_NETWORK} --description ${CLUSTERID}-dns -f value -c floating_ip_address)
+
+    - name: Ansibler DNS Setup 
+      shell: |
+        source /home/stack/my_vars
+        source /home/stack/overcloudrc
+        export PUBLIC_NETWORK_ID=$(openstack network show ${PUBLIC_NETWORK} -f value -c id)
+        export ANSIBLER_NETWORK_ID=$(openstack network show ${ANSIBLER_NETWORK} -f value -c id)
+        export ANSIBLER_SUBNET_ID=$(openstack subnet show ${ANSIBLER_SUBNET} -f value -c id)
+        openstack subnet set --no-dns-nameservers ${ANSIBLER_SUBNET_ID}
+        openstack subnet set --dns-nameserver ${ANSIBLER_DOTS}.51 ${ANSIBLER_SUBNET_ID}
+
+    - name: Setup Ansibler Host and SG
+      shell: |
+        source /home/stack/my_vars
+        source /home/stack/overcloudrc
+        export PUBLIC_NETWORK_ID=$(openstack network show ${PUBLIC_NETWORK} -f value -c id)
+        export ANSIBLER_NETWORK_ID=$(openstack network show ${ANSIBLER_NETWORK} -f value -c id)
+        export ANSIBLER_SUBNET_ID=$(openstack subnet show ${ANSIBLER_SUBNET} -f value -c id)
+        openstack security group create $ANSIBLER_SG_NAME
+        openstack security group rule create --ingress --protocol icmp ${ANSIBLER_SG_NAME}
+        openstack security group rule create --ingress --protocol tcp --dst-port 22 ${ANSIBLER_SG_NAME}
+        openstack server create --nic net-id=${ANSIBLER_NETWORK_ID},v4-fixed-ip=${ANSIBLER_DOTS}.50 --flavor ${ANSIBLERSIZE} --image ${RHELIMAGE} --key-name ${KEYPAIR} --security-group ${ANSIBLER_SG_NAME} ${CLUS
+TERID}-ansibler.${MYDOMAIN}
+        openstack server add floating ip ${CLUSTERID}-ansibler.${MYDOMAIN} $(openstack floating ip create ${PUBLIC_NETWORK} --description ${CLUSTERID}-ansibler -f value -c floating_ip_address)
+
+    - name: Setup Docker Registry Volume
+      shell: |
+        source /home/stack/my_vars
+        source /home/stack/overcloudrc
+        cinder create --name ${REGISTRY_VOL_NAME} ${REGISTRY_VOL_SIZE}
+
+    - name: Create Inventory Files
+      shell: |
+        source /home/stack/my_vars
+        source /home/stack/overcloudrc
+	 /home/stack/openshift-ansible_releases/ansible/create_inventory.sh /home/stack/my_vars        
+
+    - name: Start SSH-Agent 
+      shell: |
+        source /home/stack/my_vars
+        source /home/stack/overcloudrc
+        ssh-agent -k || true
+        eval $(ssh-agent -s)
+        chmod 600 ${KEYFILE}
+        ssh-add ${KEYFILE}
+
+    - name: Configure DNS Host w/ Ansible Playbook
+      shell: |
+        source /home/stack/my_vars
+        source /home/stack/overcloudrc
+        ansible-playbook -i /home/stack/openshift-ansible_releases/ansible/inventory /home/stack/openshift-ansible_releases/ansible/fixdns.yaml -e @/home/stack/openshift-ansible_releases/ansible/env.yaml
+        ansible-playbook -i /home/stack/openshift-ansible_releases/ansible/inventory -l dns /home/stack/openshift-ansible_releases/ansible/register.yaml -e @/home/stack/openshift-ansible_releases/ansible/env.yam
+l
+        ansible-playbook -i /home/stack/openshift-ansible_releases/ansible/inventory /home/stack/openshift-ansible_releases/ansible/dns.yaml -e @/home/stack/openshift-ansible_releases/ansible/env.yaml
+
+    - name: Configure Ansibler Host w/ Ansible Playbook
+      shell: |
+        source /home/stack/my_vars
+        source /home/stack/overcloudrc
+        ansible-playbook -i /home/stack/openshift-ansible_releases/ansible/inventory -l ansibler /home/stack/openshift-ansible_releases/ansible/register.yaml -e @/home/stack/openshift-ansible_releases/ansible/en
+v.yaml
+        ansible-playbook -i /home/stack/openshift-ansible_releases/ansible/inventory /home/stack/openshift-ansible_releases/ansible/ansibler.yaml -e @/home/stack/openshift-ansible_releases/ansible/env.yaml
+
+    - name: Update DNS & Ansibler and Reboot Hosts
+      shell: |
+        source /home/stack/my_vars
+        source /home/stack/overcloudrc
+        ansible-playbook -i /home/stack/openshift-ansible_releases/ansible/inventory -l ansibler,dns /home/stack/openshift-ansible_releases/ansible/update_and_reboot.yaml -e @/home/stack/openshift-ansible_releas
+es/ansible/env.yaml
+
+    - name: Wait for Ansibler to be back online
+      shell: |
+        source /home/stack/my_vars
+        source /home/stack/overcloudrc
+        sleep 120
+        until ssh -F /home/stack/openshift-ansible_releases/ansible/ssh_config.cfg ${IMAGEUSER}@${CLUSTERID}-ansibler.${MYDOMAIN} uptime
+        do
+          echo "Ansibler not ready yet..."
+          sleep 5
+        done
+
+    - name: Run OCP Prerequisite Playbook
+      shell: |
+        source /home/stack/my_vars
+        source /home/stack/overcloudrc
+        ssh ${IMAGEUSER}@${CLUSTERID}-ansibler.${MYDOMAIN} -F ./ssh_config.cfg 'source openstackrc && ansible-playbook --user openshift -i /usr/share/ansible/openshift-ansible/playbooks/openstack/inventory.py -i
+ inventory /usr/share/ansible/openshift-ansible/playbooks/openstack/openshift-cluster/prerequisites.yml
+
+    - name: Build Custom OCP Image Playbook
+      shell: |
+        source /home/stack/my_vars
+        source /home/stack/overcloudrc
+         #ssh ${IMAGEUSER}@${CLUSTERID}-ansibler.${MYDOMAIN} -F ./ssh_config.cfg 'source openstackrc && ansible-playbook --user openshift -i #/usr/share/ansible/openshift-ansible/playbooks/openstack/inventory.py
+ -i #inventory #/usr/share/ansible/openshift-ansible/playbooks/openstack/openshift-cluster/build_image.yml'
+
+    - name: Run OCP Provision Playbook
+      shell: |
+        source /home/stack/my_vars
+        source /home/stack/overcloudrc
+        ssh ${IMAGEUSER}@${CLUSTERID}-ansibler.${MYDOMAIN} -F /home/stack/openshift-ansible_releases/ansible/ssh_config.cfg 'source openstackrc && ansible-playbook --user openshift -i /usr/share/ansible/openshif
+t-ansible/playbooks/openstack/inventory.py -i inventory /usr/share/ansible/openshift-ansible/playbooks/openstack/openshift-cluster/provision.yml'
+    - name: Run OCP Repos Playbook
+      shell: |
+        source /home/stack/my_vars
+        source /home/stack/overcloudrc
+        ssh ${IMAGEUSER}@${CLUSTERID}-ansibler.${MYDOMAIN} -F /home/stack/openshift-ansible_releases/ansible/ssh_config.cfg 'source openstackrc && ansible-playbook --user openshift -i /usr/share/ansible/openshif
+t-ansible/playbooks/openstack/inventory.py -i inventory repos.yaml'
+
+    - name: Reboot OCP Nodes
+      shell: |
+        source /home/stack/my_vars
+        source /home/stack/overcloudrc
+        sleep 120
+        until ssh -F /home/stack/openshift-ansible_releases/ansible/ssh_config.cfg master-0-public.${CLUSTERID}.${MYDOMAIN} uptime
+        do
+          echo "master-0 not ready yet..."
+          sleep 5
+        done
+
+    - name: Run OCP Installation Playbook
+      shell: |
+        source /home/stack/my_vars
+        source /home/stack/overcloudrc
+        ssh ${IMAGEUSER}@${CLUSTERID}-ansibler.${MYDOMAIN} -F /home/stack/openshift-ansible_releases/ansible/ssh_config.cfg 'source openstackrc && ansible-playbook --user openshift -i /usr/share/ansible/openshif
+t-ansible/playbooks/openstack/inventory.py -i inventory /usr/share/ansible/openshift-ansible/playbooks/openstack/openshift-cluster/install.yml'
+
+    - name: Run OCP Validations on Cluster
+      shell: |
+        source /home/stack/my_vars
+        source /home/stack/overcloudrc
+        ssh master-0-public.${CLUSTERID}.${MYDOMAIN} -F /home/stack/openshift-ansible_releases/ansible/ssh_config.cfg 'oc version'
+        ssh master-0-public.${CLUSTERID}.${MYDOMAIN} -F /home/stack/openshift-ansible_releases/ansible/ssh_config.cfg 'oc get nodes -o wide'
+        ssh master-0-public.${CLUSTERID}.${MYDOMAIN} -F /home/stack/openshift-ansible_releases/ansible/ssh_config.cfg 'oc get pods --all-namespaces -o wide'
+        ssh master-0-public.${CLUSTERID}.${MYDOMAIN} -F /home/stack/openshift-ansible_releases/ansible/ssh_config.cfg/ssh_config.cfg 'oc adm policy add-cluster-role-to-user cluster-admin admin'
+        echo "Console: https://console.${CLUSTERID}.${MYDOMAIN}:8443/console"
+
+    - name: All OCP Tests Complete
+      shell: |
+        source /home/stack/my_vars
+        source /home/stack/overcloudrc
