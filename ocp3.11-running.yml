@@ -1,0 +1,348 @@
+---
+
+- name: Add Master Node to Inventory
+  add_host:
+    name: "undercloud"
+    ansible_fqdn: "{{ undercloud_ip }}"
+    ansible_user: "origin"
+    ansible_ssh_user: "origin"
+    ansible_password: "password"
+    ansible_host: "{{ undercloud_ip }}"
+
+  # All these actions will be run on the primary Master node.
+- delegate_to: undercloud
+  block:
+    - name: Set the openstack release name
+      set_fact:
+        release: '{{ hostvars.localhost.job_informations.job.topic.data.releasename }}'
+
+    - name: Create directories for installation
+      file:
+        path: '/home/origin/{{ item }}'
+        state: directory
+      with_items:
+        - images
+        - templates
+
+    - name: Register the Primary Master Node
+      redhat_subscription:
+        org_id: 'SUBSCRIPTION ORG ID HERE'
+        activationkey: 'SUBSCRIPTION ACTIVATION KEY HERE'
+      become: true
+
+    - name: Disable All RHEL repositories
+      shell: >
+        subscription-manager repos
+        --disable=*
+      register: rhsm
+      until: rhsm.rc == 0
+      retries: 5
+      delay: 30
+      become: true
+
+    - name: Enable Required RHEL repositories
+      shell: >
+        subscription-manager repos
+        --enable=rhel-7-server-rpms
+        --enable=rhel-7-server-extras-rpms
+        --enable=rhel-7-server-rh-common-rpms
+        --enable=rhel-7-server-ose-3.11-rpms
+        --enable=rhel-7-server-ansible-2.6-rpms
+        --enable=rhel-7-server-cnv-1.4-tech-preview-rpms
+      register: rhsm
+      until: rhsm.rc == 0
+      retries: 5
+      delay: 30
+      become: true
+
+    - name: Install OCP 311 Repos and Docker on Master
+      shell: |
+        sudo yum -y install wget git net-tools bind-utils yum-utils iptables-services bridge-utils bash-completion kexec-tools sos psacct
+
+    - name: Ensure packages are updated
+      yum:
+        name: '*'
+        state: latest
+      become: true
+
+    - name: Reboot the Master Node
+      shell: |
+        sleep 3
+        reboot
+      become: true
+      async: 1
+      poll: 0
+
+    - name: Wait for the Master node to be back online
+      wait_for:
+        host: '{{ hostvars.localhost.undercloud_ip }}'
+        port: 22
+        search_regex: OpenSSH
+        delay: 30
+      delegate_to: localhost
+
+    - name: Register Nodes1 To RHSM
+      shell: |
+        ssh origin@ocp-node1 "sudo subscription-manager register --activationkey KEY --org ID"
+        ssh origin@ocp-node1 "sudo subscription-manager repos --disable=*"
+        ssh origin@ocp-node1 "sudo subscription-manager repos --enable=rhel-7-server-rpms --enable=rhel-7-server-extras-rpms --enable=rhel-7-server-rh-common-rpms --enable=rhel-7-server-ose-3.11-rpms --enable=rhel-7-server-ansible-2.6-rpms --enable=rhel-7-server-cnv-1.4-tech-preview-rpms"
+
+    - name: Register Nodes2 To RHSM
+      shell: |
+        ssh origin@ocp-node2 "sudo subscription-manager register --activationkey KEY --org ID"
+        ssh origin@ocp-node2 "sudo subscription-manager repos --disable=*"
+        ssh origin@ocp-node2 "sudo subscription-manager repos --enable=rhel-7-server-rpms --enable=rhel-7-server-extras-rpms --enable=rhel-7-server-rh-common-rpms --enable=rhel-7-server-ose-3.11-rpms --enable=rhel-7-server-ansible-2.6-rpms --enable=rhel-7-server-cnv-1.4-tech-preview-rpms"
+
+    - name: Register Nodes3 To RHSM
+      shell: |
+        ssh origin@ocp-node3 "sudo subscription-manager register --activationkey KEY --org ID"
+        ssh origin@ocp-node3 "sudo subscription-manager repos --disable=*"
+        ssh origin@ocp-node3 "sudo subscription-manager repos --enable=rhel-7-server-rpms --enable=rhel-7-server-extras-rpms --enable=rhel-7-server-rh-common-rpms --enable=rhel-7-server-ose-3.11-rpms --enable=rhel-7-server-ansible-2.6-rpms --enable=rhel-7-server-cnv-1.4-tech-preview-rpms"
+
+    - name: Install OCP 311 Repos and Docker on Master
+      shell: |
+        sudo yum -y install openshift-ansible docker kubevirt-ansible kubevirt-virtctl 
+
+    - name: Install OCP 311 Repos and Docker on Node1
+      shell: |
+        ssh origin@ocp-node1 "sudo yum -y wget git net-tools bind-utils yum-utils iptables-services bridge-utils bash-completion kexec-tools sos psacct"
+        ssh origin@ocp-node1 "sudo yum -y upgrade"
+        ssh origin@ocp-node1 "sudo reboot"
+        sleep 60
+        ssh origin@ocp-node1 "sudo yum -y install openshift-ansible docker-1.13.1 kubevirt-ansible kubevirt-virtctl"
+
+    - name: Install OCP 311 Repos and Docker on Node2
+      shell: |
+        ssh origin@ocp-node2 "sudo yum -y install wget git net-tools bind-utils yum-utils iptables-services bridge-utils bash-completion kexec-tools sos psacct"
+        ssh origin@ocp-node2 "sudo yum -y upgrade"
+        ssh origin@ocp-node2 "sudo reboot"
+        sleep 60
+        ssh origin@ocp-node2 "sudo yum -y install openshift-ansible docker-1.13.1 kubevirt-ansible kubevirt-virtctl"
+
+    - name: Install OCP 311 Repos and Docker on Node3
+      shell: |
+        ssh origin@ocp-node3 "sudo yum -y install wget git net-tools bind-utils yum-utils iptables-services bridge-utils bash-completion kexec-tools sos psacct"
+        ssh origin@ocp-node3 "sudo yum -y upgrade"
+        ssh origin@ocp-node3 "sudo reboot"
+        sleep 60
+        ssh origin@ocp-node3 "sudo yum -y install openshift-ansible docker-1.13.1 kubevirt-ansible kubevirt-virtctl"
+
+    - name: Generate Ansible Host File on Master
+      copy:  
+        dest: "/etc/ansible/hosts"
+        content: |
+          [OSEv3:children]
+          masters
+          nodes
+          etcd
+          [OSEv3:vars]
+          # admin user created in previous section
+          ansible_ssh_user=origin
+          ansible_become=true
+          oreg_url=registry.access.redhat.com/openshift3/ose-${component}:${version}
+          openshift_deployment_type=openshift-enterprise
+          #  use HTPasswd for authentication
+          openshift_master_identity_providers=[{'name': 'htpasswd_auth', 'login': 'true', 'challenge': 'true', 'kind': 'HTPasswdPasswordIdentityProvider'}]
+          # define default sub-domain for Master node
+          openshift_master_default_subdomain=apps.schmaustech.com
+          # allow unencrypted connection within cluster
+          openshift_docker_insecure_registries=172.30.0.0/16
+          [masters]
+          ocp-master.schmaustech.com openshift_schedulable=true containerized=false
+          [etcd]
+          ocp-master.schmaustech.com
+          [nodes]
+          # defined values for [openshift_node_group_name] in the file below
+          # [/usr/share/ansible/openshift-ansible/roles/openshift_facts/defaults/main.yml]
+          ocp-master.schmaustech.com openshift_node_group_name='node-config-all-in-one'
+          ocp-node1.schmaustech.com openshift_node_group_name='node-config-compute'
+          ocp-node2.schmaustech.com openshift_node_group_name='node-config-compute'
+          ocp-node3.schmaustech.com openshift_node_group_name='node-config-compute'
+      become: true
+
+    - name: Generate Ansible Config on Master
+      copy:
+        dest: "/etc/ansible/ansible.cfg"
+        content: |
+          [defaults]
+          forks = 2
+          host_key_checking = False
+          remote_user = origin
+          gathering = smart
+          fact_caching = jsonfile
+          fact_caching_connection = $HOME/ansible/facts
+          fact_caching_timeout = 600
+          log_path = $HOME/ansible.log
+          nocows = 1
+          callback_whitelist = profile_tasks
+
+          [ssh_connection]
+          ssh_args = -F /home/origin/ssh_config.cfg
+          control_path = %(directory)s/%%h-%%r
+          pipelining = True
+          timeout = 10
+      become: true
+
+    - name: Generate SSH Config on Master for Origin User
+      copy:
+        dest: "/home/origin/ssh_config.cfg"
+        content: |
+          Host 192.168.3.100
+              HostName        ocp-master
+              User            origin
+              ForwardAgent    yes
+              StrictHostKeyChecking no
+              UserKnownHostsFile /dev/null
+              ControlMaster   auto
+              ControlPersist  600s
+              LogLevel ERROR
+
+          Host 192.168.3.101
+              HostName        ocp-node1
+              User            origin
+              ForwardAgent    yes
+              StrictHostKeyChecking no
+              UserKnownHostsFile /dev/null
+              ControlMaster   auto
+              ControlPersist  600s
+              LogLevel ERROR
+
+          Host 192.168.3.102
+              HostName        ocp-node2
+              User            origin
+              ForwardAgent    yes
+              StrictHostKeyChecking no
+              UserKnownHostsFile /dev/null
+              ControlMaster   auto
+              ControlPersist  600s
+              LogLevel ERROR
+
+          Host 192.168.3.103
+              HostName        ocp-node3
+              User            origin
+              ForwardAgent    yes
+              StrictHostKeyChecking no
+              UserKnownHostsFile /dev/null
+              ControlMaster   auto
+              ControlPersist  600s
+              LogLevel ERROR
+
+    - name: Run OpenShift Pre-Requisite Playbook
+      shell: |
+        ansible-playbook /usr/share/ansible/openshift-ansible/playbooks/prerequisites.yml
+
+    - name: Run OpenShift Deploy Cluster Playbook
+      shell: |
+        ansible-playbook /usr/share/ansible/openshift-ansible/playbooks/deploy_cluster.yml
+
+    - name: Validate OCP Is Up
+      shell: |
+        oc get nodes 
+
+    - name: Clone Rook Repo & Karan Rook Repo
+      shell: |
+        #git clone https://github.com/rook/rook.git
+        git clone https://github.com/ksingh7/ocp4-rook.git
+        sed -i.bak s+/etc/kubernetes/kubelet-plugins/volume/exec+/usr/libexec/kubernetes/kubelet-plugins/volume/exec+g /home/origin/ocp4-rook/ceph/operator.yaml
+
+    - name: Install Rook SCC & Operator
+      shell: |
+        oc create -f /home/origin/ocp4-rook/ceph/scc.yaml
+        oc create -f /home/origin/ocp4-rook/ceph/operator.yaml
+        sleep 120
+
+    - name: Install Ceph Cluster and Toolbox
+      shell: |
+        oc create -f /home/origin/ocp4-rook/ceph/cluster.yaml
+        sleep 300
+        oc create -f /home/origin/ocp4-rook/ceph/toolbox.yaml
+
+    - name: Configure Ceph Storage Class and Taint as Default
+      shell: |
+        oc create -f /home/origin/ocp4-rook/ceph/storageclass.yaml
+        oc patch storageclass rook-ceph-block -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
+
+    - name: Install KubeVirt via Ansible
+      shell: |
+        oc login -u system:admin
+        cd /usr/share/ansible/kubevirt-ansible
+        ansible-playbook -i /etc/ansible/hosts -e @vars/cnv.yml playbooks/kubevirt.yml -e apb_action=provision
+        sleep 300 
+
+    - name: Pull Down Fedora 29 Cloud Image
+      shell: |
+        curl -L -o /home/origin/f29.qcow2 http://ftp.usf.edu/pub/fedora/linux/releases/29/Cloud/x86_64/images/Fedora-Cloud-Base-29-1.2.x86_64.qcow2
+
+    - name: Upload Qcow2 Image Into Rook/Ceph PVC
+      shell: |
+        UPLOAD=`oc describe route cdi-uploadproxy-route|grep Endpoints|cut -f2`
+        virtctl image-upload --pvc-name=f29vm --pvc-size=5Gi --image-path=/home/origin/f29.qcow2 --uploadproxy-url=https://$UPLOAD --insecure
+        sleep 120
+        oc get pvc
+
+    - name: Generate F29 VM Template
+      copy:
+        dest: "/home/origin/f29vm.yaml"
+        content: |
+          apiVersion: kubevirt.io/v1alpha3
+          kind: VirtualMachine
+          metadata:
+            creationTimestamp: null
+            labels:
+              kubevirt-vm: f29vm
+            name: f29vm
+          spec:
+            running: true
+            template:
+              metadata:
+                creationTimestamp: null
+                labels:
+                  kubevirt.io/domain: f29vm
+              spec:
+                domain:
+                  cpu:
+                    cores: 2
+                  devices:
+                    disks:
+                    - disk:
+                        bus: virtio
+                      name: osdisk
+                      volumeName: osdisk
+                    - disk:
+                        bus: virtio
+                      name: cloudinitdisk
+                      volumeName: cloudinitvolume
+                    interfaces:
+                    - name: default
+                      bridge: {}
+                  resources:
+                    requests:
+                      memory: 1024M
+                terminationGracePeriodSeconds: 0
+                volumes:
+                - name: osdisk
+                  persistentVolumeClaim:
+                    claimName: f29vm
+                - name: cloudinitdisk
+                  cloudInitNoCloud:
+                    userData: |-
+                      #cloud-config
+                      password: ${PASSWORD}
+                      disable_root: false
+                      chpasswd: { expire: False }
+                      ssh_authorized_keys:
+                      - "SSH RSA KEY HERE"
+                networks:
+                - name: default
+                  pod: {}
+
+    - name: Launch Fedora 29 Virtual Machine
+      shell: |
+        oc create -f /home/origin/f29vm.yaml
+        oc get pods -o wide -n cdi
+        sleep 300
+
+    - name: Validate Fedora 29 Virtual Machine
+      shell: |
+        oc get vmi
+        ssh -i /home/origin/.ssh/id_rsa -o "StrictHostKeyChecking=no" fedora@`oc get vmi|grep f29vm|awk {'print \$4'}` "cat /etc/fedora-release"
