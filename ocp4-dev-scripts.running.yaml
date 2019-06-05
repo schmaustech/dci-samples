@@ -1,0 +1,118 @@
+---
+
+- name: Add Master Node to Inventory
+  add_host:
+    name: "undercloud"
+    ansible_fqdn: "{{ undercloud_ip }}"
+    ansible_user: "bschmaus"
+    ansible_ssh_user: "bschmaus"
+    ansible_password: "password"
+    ansible_host: "{{ undercloud_ip }}"
+
+  # All these actions will be run on the primary Master node.
+- delegate_to: undercloud
+  block:
+    - name: Set the release name
+      set_fact:
+        release: '{{ hostvars.localhost.job_informations.job.topic.data.releasename }}'
+
+    - name: DEV-SCRIPTS Cleanup Previous Installation
+      shell: |
+        cd /home/bschmaus/dev-scripts
+        make clean
+
+    - name: DEV-SCRIPTS Remove Previous Files
+      shell: |
+        cd /home/bschmaus
+        rm -r -f /home/bschmaus/dev-scripts
+        rm -r -f /home/bschmaus/go
+        rm -r -f /home/bschmaus/oc-4.1
+        rm -r -f /home/bschmaus/tripleo-repos
+        rm -r -f /home/bschmaus/.cache
+        rm -r -f /home/bschmaus/.yarn
+        rm -r -f /opt/dev-scripts
+        ls -l /home/bschmaus
+      become: true
+
+    - name: DEV-SCRIPTS Reboot Bootstrap Node
+      shell: |
+        sleep 3
+        reboot
+      become: true
+      async: 1
+      poll: 0
+
+    - name: DEV-SCRIPTS Wait For Bootstrap Node to Come Online
+      wait_for:
+        host: '{{ hostvars.localhost.undercloud_ip }}'
+        port: 22
+        search_regex: OpenSSH
+        delay: 60
+      delegate_to: localhost
+
+    - name: DEV-SCRIPTS Git Clone 
+      shell: |
+        cd /home/bschmaus
+        git clone https://github.com/openshift-metal3/dev-scripts.git
+
+    - name: DEV-SCRIPTS  Copy In Config Environment
+      shell: |
+        cd /home/bschmaus
+        cp /home/bschmaus/config_root.sh dev-scripts/config_bschmaus.sh
+
+    - name: DEV-SCRIPTS Install Requirements
+      shell: |
+        cd /home/bschmaus/dev-scripts
+        /home/bschmaus/dev-scripts/01_install_requirements.sh
+
+    - name: DEV-SCRIPTS Configure Host 
+      shell: |
+        cd /home/bschmaus/dev-scripts
+        /home/bschmaus/dev-scripts/02_configure_host.sh
+
+    - name: DEV-SCRIPTS OCP Repo Sync 
+      shell: |
+        cd /home/bschmaus/dev-scripts
+        /home/bschmaus/dev-scripts/03_ocp_repo_sync.sh
+
+    - name: DEV-SCRIPTS Ironic Setup
+      shell: |
+        cd /home/bschmaus/dev-scripts
+        /home/bschmaus/dev-scripts/04_setup_ironic.sh
+
+    - name: DEV-SCRIPTS Deploy OCP Cluster
+      shell: |
+        cd /home/bschmaus/dev-scripts
+        /home/bschmaus/dev-scripts/06_create_cluster.sh
+
+    - name: DEV-SCRIPTS Deploy BMO Operator
+      shell: |
+        cd /home/bschmaus/dev-scripts
+        /home/bschmaus/dev-scripts/08_deploy_bmo.sh
+
+    - name: DEV-SCRIPTS Deploy KubeVirt
+      shell: |
+        cd /home/bschmaus/dev-scripts
+        /home/bschmaus/dev-scripts/09_deploy_kubevirt.sh
+
+    - name: DEV-SCRIPTS Configure Rook for Seperate Public-Cluster Networking
+      shell: |
+        export KUBECONFIG=/home/bschmaus/dev-scripts/ocp/auth/kubeconfig
+        cd /home/bschmaus
+        /home/bschmaus/rook-configure-networks.sh
+
+    - name: DEV-SCRIPTS Patch 10_deploy_rook.sh Set Host Network True
+      shell: |
+        cd /home/bschmaus
+        /home/bschmaus/rook-sethostnetwork.sh
+
+    - name: DEV-SCRIPTS Deploy Rook
+      shell: |
+        cd /home/bschmaus/dev-scripts
+        /home/bschmaus/dev-scripts/10_deploy_rook.sh
+        sleep 300
+
+    - name: DEV-SCRIPTS Register Hosts
+      shell: |
+        cd /home/bschmaus/dev-scripts
+        /home/bschmaus/dev-scripts/11_register_hosts.sh
