@@ -1,0 +1,98 @@
+---
+    - name: DEV-SCRIPTS TESTS Get Node List
+      shell: |
+        export KUBECONFIG=/home/bschmaus/dev-scripts/ocp/auth/kubeconfig
+        export OS_TOKEN=fake-token
+        export OS_URL=http://localhost:6385/
+        oc get nodes -o wide
+
+    - name: DEV-SCRIPTS TESTS Get Ironic Baremetal Host List
+      shell: |
+        export KUBECONFIG=/home/bschmaus/dev-scripts/ocp/auth/kubeconfig
+        export OS_TOKEN=fake-token
+        export OS_URL=http://localhost:6385/
+        openstack baremetal node list
+
+    - name: DEV-SCRIPTS TESTS Get OC Baremetal Host List
+      shell: |
+        export KUBECONFIG=/home/bschmaus/dev-scripts/ocp/auth/kubeconfig
+        export OS_TOKEN=fake-token
+        export OS_URL=http://localhost:6385/
+        oc get baremetalhosts --namespace=openshift-machine-api 
+
+    - name: DEV-SCRIPTS TESTS Create Worker Node
+      shell: |
+        export KUBECONFIG=/home/bschmaus/dev-scripts/ocp/auth/kubeconfig
+        export OS_TOKEN=fake-token
+        export OS_URL=http://localhost:6385/
+        oc create -f /home/bschmaus/openshift-worker.yaml -n openshift-machine-api
+        until oc get nodes|grep worker-0|grep -v NotReady; do sleep 30; done
+        sleep 300
+
+    - name: DEV-SCRIPTS TESTS Add Machine IPS
+      shell: |
+        export KUBECONFIG=/home/bschmaus/dev-scripts/ocp/auth/kubeconfig
+        export OS_TOKEN=fake-token
+        export OS_URL=http://localhost:6385/
+        cd /home/bschmaus/dev-scripts
+        /home/bschmaus/dev-scripts/add-machine-ips.sh
+      ignore_errors: true
+
+
+    - name: DEV-SCRIPTS TESTS Link Worker Node
+      shell: |
+        export KUBECONFIG=/home/bschmaus/dev-scripts/ocp/auth/kubeconfig
+        export OS_TOKEN=fake-token
+        export OS_URL=http://localhost:6385/
+        cd /home/bschmaus/dev-scripts
+        MACHINE=`oc get machines --all-namespaces|grep worker-0|awk {'print \$2'}`
+        NODE=`oc get nodes|grep worker-0|awk {'print \$1'}`
+        /home/bschmaus/dev-scripts/link-machine-and-node.sh $MACHINE $NODE
+
+    - name: DEV-SCRIPTS TESTS Get Node List with Worker
+      shell: |
+        export KUBECONFIG=/home/bschmaus/dev-scripts/ocp/auth/kubeconfig
+        export OS_TOKEN=fake-token
+        export OS_URL=http://localhost:6385/
+        oc get nodes -o wide
+
+    - name: DEV-SCRIPTS TESTS Get Machine List with Worker
+      shell: |
+        export KUBECONFIG=/home/bschmaus/dev-scripts/ocp/auth/kubeconfig
+        export OS_TOKEN=fake-token
+        export OS_URL=http://localhost:6385/
+        oc get machines --all-namespaces
+
+    - name: DEV-SCRIPTS TESTS Get Ironic Baremetal Host List with Worker
+      shell: |
+        export KUBECONFIG=/home/bschmaus/dev-scripts/ocp/auth/kubeconfig
+        export OS_TOKEN=fake-token
+        export OS_URL=http://localhost:6385/
+        openstack baremetal node list
+
+    - name: DEV-SCRIPTS TESTS Get OC Baremetal Host List with Worker
+      shell: |
+        export KUBECONFIG=/home/bschmaus/dev-scripts/ocp/auth/kubeconfig
+        export OS_TOKEN=fake-token
+        export OS_URL=http://localhost:6385/
+
+    - name: DEV-SCRIPTS TESTS Get OC Routes
+      shell: |
+        export KUBECONFIG=/home/bschmaus/dev-scripts/ocp/auth/kubeconfig
+        export OS_TOKEN=fake-token
+        export OS_URL=http://localhost:6385/
+        oc get routes --all-namespaces -o wide
+
+    - name: DEV-SCRIPTS TESTS Get OC Pods
+      shell: |
+        export KUBECONFIG=/home/bschmaus/dev-scripts/ocp/auth/kubeconfig
+        export OS_TOKEN=fake-token
+        export OS_URL=http://localhost:6385/
+        oc get pods --all-namespaces -o wide
+
+    - name: DEV-SCRIPTS TESTS Get OC Services 
+      shell: |
+        export KUBECONFIG=/home/bschmaus/dev-scripts/ocp/auth/kubeconfig
+        export OS_TOKEN=fake-token
+        export OS_URL=http://localhost:6385/
+        oc get services --all-namespaces -o wide
