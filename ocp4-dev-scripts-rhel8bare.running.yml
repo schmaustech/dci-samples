@@ -1,0 +1,101 @@
+---
+
+
+- name: Add Master Node to Inventory
+  add_host:
+    name: "undercloud"
+    ansible_fqdn: "{{ undercloud_ip }}"
+    ansible_user: "bschmaus"
+    ansible_ssh_user: "bschmaus"
+    ansible_password: "password"
+    ansible_host: "{{ undercloud_ip }}"
+
+- name: DEV-SCRIPTS Power OFF Bootstrap Node
+  shell: |
+    /usr/bin/ipmitool -I lanplus -H192.168.0.4 -p6232 -Uadmin -Ppassword chassis power off
+
+- name: DEV-SCRIPTS Set Boot Device to CDROM Bootstrap Node
+  shell: |
+    /usr/bin/ipmitool -I lanplus -H192.168.0.4 -p6232 -Uadmin -Ppassword chassis bootparam set bootflag force_cdrom
+
+- name: DEV-SCRIPTS Power ON BootStrap Node For Installation of RHEL8
+  shell: |
+    /usr/bin/ipmitool -I lanplus -H192.168.0.4 -p6232 -Uadmin -Ppassword chassis power on
+    sleep 30
+
+- name: DEV-SCRIPTS Wait for RHEL8 Installation to Poweroff Node
+  shell: |
+    until /usr/bin/ipmitool -I lanplus -H192.168.0.4 -p6232 -Uadmin -Ppassword chassis status|grep "System Power"|grep off; do sleep 30; done
+    echo Bootstrap node is installed and shutdown!!!
+
+- name: DEV-SCRIPTS Set Boot Device to Disk Bootstrap Node
+  shell: |
+    /usr/bin/ipmitool -I lanplus -H192.168.0.4 -p6232 -Uadmin -Ppassword chassis bootparam set bootflag force_disk
+
+- name: DEV-SCRIPTS Power ON BootStrap Node After RHEL8 Installation
+  shell: |
+    /usr/bin/ipmitool -I lanplus -H192.168.0.4 -p6232 -Uadmin -Ppassword chassis power on
+
+- name: DEV-SCRIPTS Wait for RHEL8 Bootstrap Node to Power Up
+  shell: |
+    until ssh -q -oStrictHostKeyChecking=no bschmaus@192.168.0.246 exit; do sleep 30; done
+    echo Bootstrap node is up!
+
+  # All these actions will be run on the primary Master node.
+- delegate_to: undercloud
+  block:
+    - name: Set the release name
+      set_fact:
+        release: '{{ hostvars.localhost.job_informations.job.topic.data.releasename }}'
+
+    - name: DEV-SCRIPTS Git Clone 
+      shell: |
+        cd /home/bschmaus
+        git clone https://github.com/openshift-metal3/dev-scripts.git
+
+    - name: DEV-SCRIPTS Bridge Patch Git Clone
+      shell: |
+        cd /home/bschmaus/dev-scripts
+        git config --global user.email "bschmaus@redhat.com"
+        git config --global user.name "Benjamin Schmaus"
+        /usr/bin/curl -L https://github.com/openshift-metal3/dev-scripts/pull/282.patch | git am
+
+    - name: DEV-SCRIPTS  Copy In Config Environment
+      shell: |
+        cd /home/bschmaus
+        cp /home/bschmaus/config_root.sh dev-scripts/config_bschmaus.sh
+
+    - name: DEV-SCRIPTS Install Requirements
+      shell: |
+        cd /home/bschmaus/dev-scripts
+        /home/bschmaus/dev-scripts/01_install_requirements.sh
+
+    - name: DEV-SCRIPTS Configure Host 
+      shell: |
+        cd /home/bschmaus/dev-scripts
+        /home/bschmaus/dev-scripts/02_configure_host.sh
+
+    - name: DEV-SCRIPTS OCP Repo Sync 
+      shell: |
+        cd /home/bschmaus/dev-scripts
+        /home/bschmaus/dev-scripts/03_ocp_repo_sync.sh
+
+    - name: DEV-SCRIPTS Ironic Setup
+      shell: |
+        cd /home/bschmaus/dev-scripts
+        /home/bschmaus/dev-scripts/04_setup_ironic.sh
+
+    - name: DEV-SCRIPTS Deploy OCP Cluster
+      shell: |
+        cd /home/bschmaus/dev-scripts
+        /home/bschmaus/dev-scripts/06_create_cluster.sh
+
+    - name: DEV-SCRIPTS Deploy BMO Operator
+      shell: |
+        cd /home/bschmaus/dev-scripts
+        /home/bschmaus/dev-scripts/08_deploy_bmo.sh
+
+    - name: DEV-SCRIPTS Register Hosts
+      shell: |
+        cd /home/bschmaus/dev-scripts
+        /home/bschmaus/dev-scripts/11_register_hosts.sh
