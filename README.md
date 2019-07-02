@@ -14,3 +14,5 @@ This repopository just contains DCI sample playbooks
 -ocp4-dev-scripts-local_tests.yaml: Local tests file for OCP4 deployment
 
 -ocp4-dev-scripts-local_tests_rook.yaml: Local tests file for OCP4 deployment with Rook/Ceph cluster deployed
+
+-ocp4-dev-scripts-rhel8bare.running.yaml: Uses a RHEL8 custom image to boot baremetal node and install bootstrap which then deploys OCP4 on 3 master nodes.
