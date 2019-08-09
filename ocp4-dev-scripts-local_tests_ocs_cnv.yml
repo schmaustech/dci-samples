@@ -1,0 +1,103 @@
+---
+    - name: DEV-SCRIPTS TESTS Get Node List
+      shell: |
+        export KUBECONFIG=/home/bschmaus/dev-scripts/ocp/auth/kubeconfig
+        export OS_TOKEN=fake-token
+        export OS_URL=http://localhost:6385/
+        oc get nodes -o wide
+
+    - name: DEV-SCRIPTS TESTS Get Ironic Baremetal Host List
+      shell: |
+        export KUBECONFIG=/home/bschmaus/dev-scripts/ocp/auth/kubeconfig
+        export OS_TOKEN=fake-token
+        export OS_URL=http://localhost:6385/
+        openstack baremetal node list
+
+    - name: DEV-SCRIPTS TESTS Get OC Baremetal Host List
+      shell: |
+        export KUBECONFIG=/home/bschmaus/dev-scripts/ocp/auth/kubeconfig
+        export OS_TOKEN=fake-token
+        export OS_URL=http://localhost:6385/
+        oc get baremetalhosts --namespace=openshift-machine-api 
+
+    - name: DEV-SCRIPTS TESTS Create Rook Config Override
+      shell: |
+        export KUBECONFIG=/home/bschmaus/dev-scripts/ocp/auth/kubeconfig
+        /home/bschmaus/rook-config-override.sh
+
+    - name: DEV-SCRIPTS TESTS Enable Tech Preview
+      shell: |
+        export KUBECONFIG=/home/bschmaus/dev-scripts/ocp/auth/kubeconfig
+        /home/bschmaus/00-enable-tech-preview.sh
+
+    - name: DEV-SCRIPTS TESTS Install Ceph Cluster & Toolbox
+      shell: |
+        export KUBECONFIG=/home/bschmaus/dev-scripts/ocp/auth/kubeconfig
+        /home/bschmaus/deploy-ocs.sh
+
+    - name: DEV-SCRIPTS TESTS Install Ceph Object
+      shell: |
+        export KUBECONFIG=/home/bschmaus/dev-scripts/ocp/auth/kubeconfig
+        /home/bschmaus/deploy-ocs-object.sh
+
+    - name: DEV-SCRIPTS TESTS Install CNV
+      shell: |
+        export KUBECONFIG=/home/bschmaus/dev-scripts/ocp/auth/kubeconfig
+        /home/bschmaus/deploy-cnv.sh
+        sleep 300
+      ignore_errors: true
+
+    - name: DEV-SCRIPTS TESTS Get Node List with Worker
+      shell: |
+        export KUBECONFIG=/home/bschmaus/dev-scripts/ocp/auth/kubeconfig
+        export OS_TOKEN=fake-token
+        export OS_URL=http://localhost:6385/
+        oc get nodes -o wide
+
+    - name: DEV-SCRIPTS TESTS Get Machine List with Worker
+      shell: |
+        export KUBECONFIG=/home/bschmaus/dev-scripts/ocp/auth/kubeconfig
+        export OS_TOKEN=fake-token
+        export OS_URL=http://localhost:6385/
+        oc get machines --all-namespaces
+
+    - name: DEV-SCRIPTS TESTS Get Ironic Baremetal Host List with Worker
+      shell: |
+        export KUBECONFIG=/home/bschmaus/dev-scripts/ocp/auth/kubeconfig
+        export OS_TOKEN=fake-token
+        export OS_URL=http://localhost:6385/
+        openstack baremetal node list
+
+    - name: DEV-SCRIPTS TESTS Get OC Baremetal Host List with Worker
+      shell: |
+        export KUBECONFIG=/home/bschmaus/dev-scripts/ocp/auth/kubeconfig
+        export OS_TOKEN=fake-token
+        export OS_URL=http://localhost:6385/
+
+    - name: DEV-SCRIPTS TESTS Get OC Routes
+      shell: |
+        export KUBECONFIG=/home/bschmaus/dev-scripts/ocp/auth/kubeconfig
+        export OS_TOKEN=fake-token
+        export OS_URL=http://localhost:6385/
+        oc get routes --all-namespaces -o wide
+
+    - name: DEV-SCRIPTS TESTS Get OC Pods
+      shell: |
+        export KUBECONFIG=/home/bschmaus/dev-scripts/ocp/auth/kubeconfig
+        export OS_TOKEN=fake-token
+        export OS_URL=http://localhost:6385/
+        oc get pods --all-namespaces -o wide
+
+    - name: DEV-SCRIPTS TESTS Get OC Services 
+      shell: |
+        export KUBECONFIG=/home/bschmaus/dev-scripts/ocp/auth/kubeconfig
+        export OS_TOKEN=fake-token
+        export OS_URL=http://localhost:6385/
+        oc get services --all-namespaces -o wide
+
+    - name: DEV-SCRIPTS TESTS Python Cluster Check
+      shell: |
+        export KUBECONFIG=/home/bschmaus/dev-scripts/ocp/auth/kubeconfig
+        sudo yum -y install python3-dns.noarch
+        /home/bschmaus/check_cluster.py
+      ignore_errors: true
